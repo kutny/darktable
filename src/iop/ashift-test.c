@@ -31,12 +31,6 @@
 #include "develop/tiling.h"
 #include "dtgtk/button.h"
 #include "dtgtk/resetlabel.h"
-#include "gui/accelerators.h"
-#include "gui/draw.h"
-#include "gui/gtk.h"
-#include "gui/guides.h"
-#include "gui/presets.h"
-#include "iop/iop_api.h"
 
 #include <assert.h>
 #include <gtk/gtk.h>
@@ -117,328 +111,6 @@ int flags()
   return IOP_FLAGS_ALLOW_TILING | IOP_FLAGS_TILING_FULL_ROI | IOP_FLAGS_ONE_INSTANCE;
 }
 
-int default_group()
-{
-  return IOP_GROUP_CORRECT;
-}
-
-int operation_tags()
-{
-  return IOP_TAG_DISTORT;
-}
-
-int operation_tags_filter()
-{
-  // switch off clipping and decoration, we want to see the full image.
-  return IOP_TAG_DECORATION | IOP_TAG_CLIPPING;
-}
-
-typedef enum dt_iop_ashift_homodir_t
-{
-  ASHIFT_HOMOGRAPH_FORWARD,
-  ASHIFT_HOMOGRAPH_INVERTED
-} dt_iop_ashift_homodir_t;
-
-typedef enum dt_iop_ashift_linetype_t
-{
-  ASHIFT_LINE_IRRELEVANT   = 0,       // the line is found to be not interesting
-                                      // eg. too short, or not horizontal or vertical
-  ASHIFT_LINE_RELEVANT     = 1 << 0,  // the line is relevant for us
-  ASHIFT_LINE_DIRVERT      = 1 << 1,  // the line is (mostly) vertical, else (mostly) horizontal
-  ASHIFT_LINE_SELECTED     = 1 << 2,  // the line is selected for fitting
-  ASHIFT_LINE_VERTICAL_NOT_SELECTED   = ASHIFT_LINE_RELEVANT | ASHIFT_LINE_DIRVERT,
-  ASHIFT_LINE_HORIZONTAL_NOT_SELECTED = ASHIFT_LINE_RELEVANT,
-  ASHIFT_LINE_VERTICAL_SELECTED = ASHIFT_LINE_RELEVANT | ASHIFT_LINE_DIRVERT | ASHIFT_LINE_SELECTED,
-  ASHIFT_LINE_HORIZONTAL_SELECTED = ASHIFT_LINE_RELEVANT | ASHIFT_LINE_SELECTED,
-  ASHIFT_LINE_MASK = ASHIFT_LINE_RELEVANT | ASHIFT_LINE_DIRVERT | ASHIFT_LINE_SELECTED
-} dt_iop_ashift_linetype_t;
-
-typedef enum dt_iop_ashift_linecolor_t
-{
-  ASHIFT_LINECOLOR_GREY    = 0,
-  ASHIFT_LINECOLOR_GREEN   = 1,
-  ASHIFT_LINECOLOR_RED     = 2,
-  ASHIFT_LINECOLOR_BLUE    = 3,
-  ASHIFT_LINECOLOR_YELLOW  = 4
-} dt_iop_ashift_linecolor_t;
-
-typedef enum dt_iop_ashift_fitaxis_t
-{
-  ASHIFT_FIT_NONE          = 0,       // none
-  ASHIFT_FIT_ROTATION      = 1 << 0,  // flag indicates to fit rotation angle
-  ASHIFT_FIT_LENS_VERT     = 1 << 1,  // flag indicates to fit vertical lens shift
-  ASHIFT_FIT_LENS_HOR      = 1 << 2,  // flag indicates to fit horizontal lens shift
-  ASHIFT_FIT_SHEAR         = 1 << 3,  // flag indicates to fit shear parameter
-  ASHIFT_FIT_LINES_VERT    = 1 << 4,  // use vertical lines for fitting
-  ASHIFT_FIT_LINES_HOR     = 1 << 5,  // use horizontal lines for fitting
-  ASHIFT_FIT_LENS_BOTH = ASHIFT_FIT_LENS_VERT | ASHIFT_FIT_LENS_HOR,
-  ASHIFT_FIT_LINES_BOTH = ASHIFT_FIT_LINES_VERT | ASHIFT_FIT_LINES_HOR,
-  ASHIFT_FIT_VERTICALLY = ASHIFT_FIT_ROTATION | ASHIFT_FIT_LENS_VERT | ASHIFT_FIT_LINES_VERT,
-  ASHIFT_FIT_HORIZONTALLY = ASHIFT_FIT_ROTATION | ASHIFT_FIT_LENS_HOR | ASHIFT_FIT_LINES_HOR,
-  ASHIFT_FIT_BOTH = ASHIFT_FIT_ROTATION | ASHIFT_FIT_LENS_VERT | ASHIFT_FIT_LENS_HOR |
-                    ASHIFT_FIT_LINES_VERT | ASHIFT_FIT_LINES_HOR,
-  ASHIFT_FIT_VERTICALLY_NO_ROTATION = ASHIFT_FIT_LENS_VERT | ASHIFT_FIT_LINES_VERT,
-  ASHIFT_FIT_HORIZONTALLY_NO_ROTATION = ASHIFT_FIT_LENS_HOR | ASHIFT_FIT_LINES_HOR,
-  ASHIFT_FIT_BOTH_NO_ROTATION = ASHIFT_FIT_LENS_VERT | ASHIFT_FIT_LENS_HOR |
-                                ASHIFT_FIT_LINES_VERT | ASHIFT_FIT_LINES_HOR,
-  ASHIFT_FIT_BOTH_SHEAR = ASHIFT_FIT_ROTATION | ASHIFT_FIT_LENS_VERT | ASHIFT_FIT_LENS_HOR |
-                    ASHIFT_FIT_SHEAR | ASHIFT_FIT_LINES_VERT | ASHIFT_FIT_LINES_HOR,
-  ASHIFT_FIT_ROTATION_VERTICAL_LINES = ASHIFT_FIT_ROTATION | ASHIFT_FIT_LINES_VERT,
-  ASHIFT_FIT_ROTATION_HORIZONTAL_LINES = ASHIFT_FIT_ROTATION | ASHIFT_FIT_LINES_HOR,
-  ASHIFT_FIT_ROTATION_BOTH_LINES = ASHIFT_FIT_ROTATION | ASHIFT_FIT_LINES_VERT | ASHIFT_FIT_LINES_HOR,
-  ASHIFT_FIT_FLIP = ASHIFT_FIT_LENS_VERT | ASHIFT_FIT_LENS_HOR | ASHIFT_FIT_LINES_VERT | ASHIFT_FIT_LINES_HOR
-} dt_iop_ashift_fitaxis_t;
-
-typedef enum dt_iop_ashift_nmsresult_t
-{
-  NMS_SUCCESS = 0,
-  NMS_NOT_ENOUGH_LINES = 1,
-  NMS_DID_NOT_CONVERGE = 2,
-  NMS_INSANE = 3
-} dt_iop_ashift_nmsresult_t;
-
-typedef enum dt_iop_ashift_enhance_t
-{
-  ASHIFT_ENHANCE_NONE       = 0,
-  ASHIFT_ENHANCE_EDGES      = 1 << 0,
-  ASHIFT_ENHANCE_DETAIL     = 1 << 1,
-  ASHIFT_ENHANCE_HORIZONTAL = 0x100,
-  ASHIFT_ENHANCE_VERTICAL   = 0x200
-} dt_iop_ashift_enhance_t;
-
-typedef enum dt_iop_ashift_mode_t
-{
-  ASHIFT_MODE_GENERIC = 0,
-  ASHIFT_MODE_SPECIFIC = 1
-} dt_iop_ashift_mode_t;
-
-typedef enum dt_iop_ashift_crop_t
-{
-  ASHIFT_CROP_OFF = 0,
-  ASHIFT_CROP_LARGEST = 1,
-  ASHIFT_CROP_ASPECT = 2
-} dt_iop_ashift_crop_t;
-
-typedef enum dt_iop_ashift_bounding_t
-{
-  ASHIFT_BOUNDING_OFF = 0,
-  ASHIFT_BOUNDING_SELECT = 1,
-  ASHIFT_BOUNDING_DESELECT = 2
-} dt_iop_ashift_bounding_t;
-
-typedef enum dt_iop_ashift_jobcode_t
-{
-  ASHIFT_JOBCODE_NONE = 0,
-  ASHIFT_JOBCODE_GET_STRUCTURE = 1,
-  ASHIFT_JOBCODE_FIT = 2
-} dt_iop_ashift_jobcode_t;
-
-typedef struct dt_iop_ashift_params1_t
-{
-  float rotation;
-  float lensshift_v;
-  float lensshift_h;
-  int toggle;
-} dt_iop_ashift_params1_t;
-
-typedef struct dt_iop_ashift_params2_t
-{
-  float rotation;
-  float lensshift_v;
-  float lensshift_h;
-  float f_length;
-  float crop_factor;
-  float orthocorr;
-  float aspect;
-  dt_iop_ashift_mode_t mode;
-  int toggle;
-} dt_iop_ashift_params2_t;
-
-typedef struct dt_iop_ashift_params3_t
-{
-  float rotation;
-  float lensshift_v;
-  float lensshift_h;
-  float f_length;
-  float crop_factor;
-  float orthocorr;
-  float aspect;
-  dt_iop_ashift_mode_t mode;
-  int toggle;
-  dt_iop_ashift_crop_t cropmode;
-  float cl;
-  float cr;
-  float ct;
-  float cb;
-} dt_iop_ashift_params3_t;
-
-typedef struct dt_iop_ashift_params_t
-{
-  float rotation;
-  float lensshift_v;
-  float lensshift_h;
-  float shear;
-  float f_length;
-  float crop_factor;
-  float orthocorr;
-  float aspect;
-  dt_iop_ashift_mode_t mode;
-  int toggle;
-  dt_iop_ashift_crop_t cropmode;
-  float cl;
-  float cr;
-  float ct;
-  float cb;
-} dt_iop_ashift_params_t;
-
-typedef struct dt_iop_ashift_line_t
-{
-  float p1[3];
-  float p2[3];
-  float length;
-  float width;
-  float weight;
-  dt_iop_ashift_linetype_t type;
-  // homogeneous coordinates:
-  float L[3];
-} dt_iop_ashift_line_t;
-
-typedef struct dt_iop_ashift_points_idx_t
-{
-  size_t offset;
-  int length;
-  int near;
-  int bounded;
-  dt_iop_ashift_linetype_t type;
-  dt_iop_ashift_linecolor_t color;
-  // bounding box:
-  float bbx, bby, bbX, bbY;
-} dt_iop_ashift_points_idx_t;
-
-typedef struct dt_iop_ashift_fit_params_t
-{
-  int params_count;
-  dt_iop_ashift_linetype_t linetype;
-  dt_iop_ashift_linetype_t linemask;
-  dt_iop_ashift_line_t *lines;
-  int lines_count;
-  int width;
-  int height;
-  float weight;
-  float f_length_kb;
-  float orthocorr;
-  float aspect;
-  float rotation;
-  float lensshift_v;
-  float lensshift_h;
-  float shear;
-  float rotation_range;
-  float lensshift_v_range;
-  float lensshift_h_range;
-  float shear_range;
-} dt_iop_ashift_fit_params_t;
-
-typedef struct dt_iop_ashift_cropfit_params_t
-{
-  int width;
-  int height;
-  float x;
-  float y;
-  float alpha;
-  float homograph[3][3];
-  float edges[4][3];
-} dt_iop_ashift_cropfit_params_t;
-
-typedef struct dt_iop_ashift_gui_data_t
-{
-  GtkWidget *rotation;
-  GtkWidget *lensshift_v;
-  GtkWidget *lensshift_h;
-  GtkWidget *shear;
-  GtkWidget *guide_lines;
-  GtkWidget *cropmode;
-  GtkWidget *mode;
-  GtkWidget *f_length;
-  GtkWidget *crop_factor;
-  GtkWidget *orthocorr;
-  GtkWidget *aspect;
-  GtkWidget *fit_v;
-  GtkWidget *fit_h;
-  GtkWidget *fit_both;
-  GtkWidget *structure;
-  GtkWidget *clean;
-  GtkWidget *eye;
-  int lines_suppressed;
-  int fitting;
-  int isflipped;
-  int show_guides;
-  int isselecting;
-  int isdeselecting;
-  dt_iop_ashift_bounding_t isbounding;
-  float near_delta;
-  int selecting_lines_version;
-  float rotation_range;
-  float lensshift_v_range;
-  float lensshift_h_range;
-  float shear_range;
-  dt_iop_ashift_line_t *lines;
-  int lines_in_width;
-  int lines_in_height;
-  int lines_x_off;
-  int lines_y_off;
-  int lines_count;
-  int vertical_count;
-  int horizontal_count;
-  int lines_version;
-  float vertical_weight;
-  float horizontal_weight;
-  float *points;
-  dt_iop_ashift_points_idx_t *points_idx;
-  int points_lines_count;
-  int points_version;
-  float *buf;
-  int buf_width;
-  int buf_height;
-  int buf_x_off;
-  int buf_y_off;
-  float buf_scale;
-  uint64_t lines_hash;
-  uint64_t grid_hash;
-  uint64_t buf_hash;
-  dt_iop_ashift_fitaxis_t lastfit;
-  float lastx;
-  float lasty;
-  float crop_cx;
-  float crop_cy;
-  dt_iop_ashift_jobcode_t jobcode;
-  int jobparams;
-  dt_pthread_mutex_t lock;
-  gboolean adjust_crop;
-} dt_iop_ashift_gui_data_t;
-
-typedef struct dt_iop_ashift_data_t
-{
-  float rotation;
-  float lensshift_v;
-  float lensshift_h;
-  float shear;
-  float f_length_kb;
-  float orthocorr;
-  float aspect;
-  float cl;
-  float cr;
-  float ct;
-  float cb;
-} dt_iop_ashift_data_t;
-
-typedef struct dt_iop_ashift_global_data_t
-{
-  int kernel_ashift_bilinear;
-  int kernel_ashift_bicubic;
-  int kernel_ashift_lanczos2;
-  int kernel_ashift_lanczos3;
-} dt_iop_ashift_global_data_t;
-
 int legacy_params(dt_iop_module_t *self, const void *const old_params, const int old_version,
                   void *new_params, const int new_version)
 {
@@ -507,24 +179,6 @@ int legacy_params(dt_iop_module_t *self, const void *const old_params, const int
   }
 
   return 1;
-}
-
-void init_key_accels(dt_iop_module_so_t *self)
-{
-  dt_accel_register_slider_iop(self, FALSE, NC_("accel", "rotation"));
-  dt_accel_register_slider_iop(self, FALSE, NC_("accel", "lens shift (v)"));
-  dt_accel_register_slider_iop(self, FALSE, NC_("accel", "lens shift (h)"));
-  dt_accel_register_slider_iop(self, FALSE, NC_("accel", "shear"));
-}
-
-void connect_key_accels(dt_iop_module_t *self)
-{
-  dt_iop_ashift_gui_data_t *g = (dt_iop_ashift_gui_data_t *)self->gui_data;
-
-  dt_accel_connect_slider_iop(self, "rotation", GTK_WIDGET(g->rotation));
-  dt_accel_connect_slider_iop(self, "lens shift (v)", GTK_WIDGET(g->lensshift_v));
-  dt_accel_connect_slider_iop(self, "lens shift (h)", GTK_WIDGET(g->lensshift_h));
-  dt_accel_connect_slider_iop(self, "shear", GTK_WIDGET(g->shear));
 }
 
 // multiply 3x3 matrix with 3x1 vector
@@ -2805,7 +2459,6 @@ error:
 }
 
 
-/* TODO: tohle asi taky pro CLI */
 void process(struct dt_iop_module_t *self, dt_dev_pixelpipe_iop_t *piece, const void *const ivoid,
              void *const ovoid, const dt_iop_roi_t *const roi_in, const dt_iop_roi_t *const roi_out)
 {
@@ -2932,7 +2585,6 @@ void process(struct dt_iop_module_t *self, dt_dev_pixelpipe_iop_t *piece, const 
   }
 }
 
-/* TODO: nebo tohle? */
 #ifdef HAVE_OPENCL
 int process_cl(struct dt_iop_module_t *self, dt_dev_pixelpipe_iop_t *piece, cl_mem dev_in, cl_mem dev_out,
                const dt_iop_roi_t *const roi_in, const dt_iop_roi_t *const roi_out)
@@ -4486,11 +4138,10 @@ void gui_update(struct dt_iop_module_t *self)
   }
 }
 
-/* TODO: tohle by me mohlo zajimat pro tu command line interface CLI */
 void init(dt_iop_module_t *module)
 {
   module->params = calloc(1, sizeof(dt_iop_ashift_params_t));
-  module->default_params = calloc(1, sizeof(dt_iop_ashift_params_t)); /* TODO: */
+  module->default_params = calloc(1, sizeof(dt_iop_ashift_params_t));
   module->default_enabled = 0;
   module->priority = 214; // module order created by iop_dependencies.py, do not edit!
   module->params_size = sizeof(dt_iop_ashift_params_t);
@@ -4839,7 +4490,6 @@ void gui_init(struct dt_iop_module_t *self)
   gtk_widget_set_size_request(g->fit_h, -1, DT_PIXEL_APPLY_DPI(24));
   gtk_grid_attach_next_to(GTK_GRID(grid), g->fit_h, g->fit_v, GTK_POS_RIGHT, 1, 1);
 
-  /* tlacitko co me zajima */
   g->fit_both = dtgtk_button_new(dtgtk_cairo_paint_perspective, CPF_STYLE_FLAT | CPF_DO_NOT_USE_BORDER | 3, NULL);
   gtk_widget_set_hexpand(GTK_WIDGET(g->fit_both), TRUE);
   gtk_widget_set_size_request(g->fit_both, -1, DT_PIXEL_APPLY_DPI(24));

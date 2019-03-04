@@ -1,0 +1,97 @@
+/** called once per module, at startup. */
+void init_global(struct dt_iop_module_so_t *self);
+/** called once per module, at shutdown. */
+void cleanup_global(struct dt_iop_module_so_t *self);
+
+/** get name of the module, to be translated. */
+const char *name();
+/** get the default group this module belongs to. */
+int default_group();
+/** get the iop module flags. */
+int flags();
+
+int operation_tags();
+int operation_tags_filter();
+
+/** callback methods for gui. */
+/** synch gtk interface with gui params, if necessary. */
+void gui_update(struct dt_iop_module_t *self);
+/** construct widget. */
+void gui_init(struct dt_iop_module_t *self);
+/** destroy widget. */
+void gui_cleanup(struct dt_iop_module_t *self);
+/** optional method called after darkroom expose. */
+void gui_post_expose(struct dt_iop_module_t *self, cairo_t *cr, int32_t width, int32_t height,
+                     int32_t pointerx, int32_t pointery);
+/** optional callback to be notified if the module acquires gui focus/loses it. */
+void gui_focus(struct dt_iop_module_t *self, gboolean in);
+
+/** Optional callback for keyboard accelerators */
+void init_key_accels(struct dt_iop_module_so_t *so);
+void original_init_key_accels(struct dt_iop_module_so_t *so);
+/** Key accelerator registration callbacks */
+void connect_key_accels(struct dt_iop_module_t *self);
+void original_connect_key_accels(struct dt_iop_module_t *self);
+void disconnect_key_accels(struct dt_iop_module_t *self);
+
+/** optional event callbacks */
+int mouse_moved(struct dt_iop_module_t *self, double x, double y, double pressure, int which);
+int button_released(struct dt_iop_module_t *self, double x, double y, int which, uint32_t state);
+int button_pressed(struct dt_iop_module_t *self, double x, double y, double pressure, int which, int type,
+                   uint32_t state);
+
+int scrolled(struct dt_iop_module_t *self, double x, double y, int up, uint32_t state);
+
+void init(struct dt_iop_module_t *self); // this MUST set params_size!
+void cleanup(struct dt_iop_module_t *self);
+
+/** this inits the piece of the pipe, allocing piece->data as necessary. */
+void init_pipe(struct dt_iop_module_t *self, struct dt_dev_pixelpipe_t *pipe,
+               struct dt_dev_pixelpipe_iop_t *piece);
+/** this resets the params to factory defaults. used at the beginning of each history synch. */
+/** this commits (a mutex will be locked to synch pipe/gui) the given history params to the pixelpipe piece.
+ */
+void commit_params(struct dt_iop_module_t *self, dt_iop_params_t *params, struct dt_dev_pixelpipe_t *pipe,
+                   struct dt_dev_pixelpipe_iop_t *piece);
+/** this is the chance to update default parameters, after the full raw is loaded. */
+void reload_defaults(struct dt_iop_module_t *self);
+
+/** this destroys all resources needed by the piece of the pixelpipe. */
+void cleanup_pipe(struct dt_iop_module_t *self, struct dt_dev_pixelpipe_t *pipe,
+                  struct dt_dev_pixelpipe_iop_t *piece);
+void modify_roi_in(struct dt_iop_module_t *self, struct dt_dev_pixelpipe_iop_t *piece,
+                   const struct dt_iop_roi_t *roi_out, struct dt_iop_roi_t *roi_in);
+void modify_roi_out(struct dt_iop_module_t *self, struct dt_dev_pixelpipe_iop_t *piece,
+                    struct dt_iop_roi_t *roi_out, const struct dt_iop_roi_t *roi_in);
+int legacy_params(struct dt_iop_module_t *self, const void *const old_params, const int old_version,
+                  void *new_params, const int new_version);
+
+/** this is the temp homebrew callback to operations.
+  * x,y, and scale are just given for orientation in the framebuffer. i and o are
+  * scaled to the same size width*height and contain a max of 3 floats. other color
+  * formats may be filled by this callback, if the pipeline can handle it. */
+/** the simplest variant of process(). you can only use OpenMP SIMD here, no intrinsics */
+/** must be provided by each IOP. */
+void process(struct dt_iop_module_t *self, struct dt_dev_pixelpipe_iop_t *piece, const void *const i,
+             void *const o, const struct dt_iop_roi_t *const roi_in,
+             const struct dt_iop_roi_t *const roi_out);
+
+#ifdef HAVE_OPENCL
+/** the opencl equivalent of process(). */
+int process_cl(struct dt_iop_module_t *self, struct dt_dev_pixelpipe_iop_t *piece, cl_mem dev_in,
+               cl_mem dev_out, const struct dt_iop_roi_t *const roi_in,
+               const struct dt_iop_roi_t *const roi_out);
+#endif
+
+/** this functions are used for distort iop
+ * points is an array of float {x1,y1,x2,y2,...}
+ * size is 2*points_count */
+/** points before the iop is applied => point after processed */
+int distort_transform(struct dt_iop_module_t *self, struct dt_dev_pixelpipe_iop_t *piece, float *points,
+                      size_t points_count);
+/** reverse points after the iop is applied => point before process */
+int distort_backtransform(struct dt_iop_module_t *self, struct dt_dev_pixelpipe_iop_t *piece, float *points,
+                          size_t points_count);
+
+void distort_mask(struct dt_iop_module_t *self, struct dt_dev_pixelpipe_iop_t *piece, const float *const in,
+                  float *const out, const struct dt_iop_roi_t *const roi_in, const struct dt_iop_roi_t *const roi_out);

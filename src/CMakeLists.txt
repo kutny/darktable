@@ -121,46 +121,6 @@ FILE(GLOB SOURCE_FILES
   )
 FILE(GLOB HEADER_FILES "*.h" "common/*.h" "external/CL/*.h" "control/*.h" "iop/*.h" "libs/*.h" "views/*.h")
 
-if(APPLE)
-  list(APPEND SOURCE_FILES "osx/osx.mm")
-  list(APPEND HEADER_FILES "osx/osx.h")
-  set_source_files_properties(osx/osx.mm PROPERTIES LANGUAGE CXX)
-endif(APPLE)
-
-if(WIN32)
-  list(APPEND SOURCE_FILES "win/strptime.c")
-  list(APPEND HEADER_FILES "win/strptime.h")
-  list(APPEND SOURCE_FILES "win/statvfs.c")
-  list(APPEND HEADER_FILES "win/statvfs.h")
-
-  list(APPEND SOURCE_FILES "win/getrusage.c")
-  list(APPEND HEADER_FILES "win/getrusage.h")
-
-  list(APPEND SOURCE_FILES "win/rlimit.c")
-  list(APPEND HEADER_FILES "win/rlimit.h")
-
-  list(APPEND SOURCE_FILES "win/getdelim.c")
-  list(APPEND HEADER_FILES "win/getdelim.h")
-
-  list(APPEND SOURCE_FILES "win/dtwin.c")
-  list(APPEND HEADER_FILES "win/dtwin.h")
-
-  # Use mingw's sprintf instead of windows's
-  ADD_DEFINITIONS( -D__USE_MINGW_ANSI_STDIO=1 )
-
-  # add it to have proper time.h functions available
-  ADD_DEFINITIONS(-D_POSIX_THREAD_SAFE_FUNCTIONS)
-
-  # avoid calling legacy ANSI win api functions
-  add_definitions("-DUNICODE -D_UNICODE")
-
-  # add icon, version, ... resources for Windows executable
-  configure_file("${CMAKE_SOURCE_DIR}/data/pixmaps/dt_logo_128x128.ico" "${CMAKE_BINARY_DIR}/data/pixmaps/dt_logo_128x128.ico" COPYONLY)
-  SET(CMAKE_RC_COMPILE_OBJECT "<CMAKE_RC_COMPILER> -O coff <DEFINES> -i <SOURCE> -o <OBJECT>")
-  set(RESOURCE_OBJECT "${CMAKE_CURRENT_BINARY_DIR}/win/darktable.rc")
-  configure_file("${CMAKE_CURRENT_SOURCE_DIR}/win/darktable.rc.in" "${CMAKE_CURRENT_BINARY_DIR}/win/darktable.rc")
-endif(WIN32)
-
 set(SOURCES ${SOURCE_FILES} ${HEADER_FILES})
 
 if(CMAKE_SYSTEM_PROCESSOR STREQUAL "ppc64le")
@@ -205,17 +165,6 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -std=c99")
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11")
 
-if(APPLE AND (CMAKE_CXX_COMPILER_ID STREQUAL "AppleClang" OR CMAKE_CXX_COMPILER_ID STREQUAL "Clang"))
-        set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -stdlib=libc++")
-        list(REMOVE_ITEM CMAKE_CXX_IMPLICIT_LINK_LIBRARIES stdc++)
-        list(APPEND CMAKE_CXX_IMPLICIT_LINK_LIBRARIES c++)
-        list(REMOVE_DUPLICATES CMAKE_CXX_IMPLICIT_LINK_LIBRARIES)
-        # Also remove incorrectly parsed -lto_library flag
-        # It wasn't present with Xcode 7.2 and appeared before 8.3 release
-        # cmake 3.7.2 doesn't understand this flag and thinks it's a library
-        list(REMOVE_ITEM CMAKE_CXX_IMPLICIT_LINK_LIBRARIES to_library)
-endif()
-
 # Check for base threading library
 set(CMAKE_THREAD_PREFER_PTHREAD TRUE)
 find_package(Threads REQUIRED)
@@ -241,10 +190,6 @@ if(USE_OPENMP)
   endif()
 
   list(APPEND LIBS ${OpenMP_C_LIBRARIES} ${OpenMP_CXX_LIBRARIES})
-
-  if(WIN32)
-    list(APPEND LIBS gomp)
-  endif(WIN32)
 endif(USE_OPENMP)
 
 if(USE_DARKTABLE_PROFILING)
@@ -481,19 +426,6 @@ int main(void)
 if(NOT HAVE_TLS)
   MESSAGE(FATAL_ERROR "The compiler does not support Thread-local storage.")
 endif()
-
-
-if(WIN32)
-  set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -Wl,--enable-runtime-pseudo-reloc -municode")
-  set(CMAKE_MODULE_LINKER_FLAGS "${CMAKE_MODULE_LINKER_FLAGS} -Wl,--enable-runtime-pseudo-reloc")
-  set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -Wl,--enable-runtime-pseudo-reloc")
-
-  SET(CMAKE_SHARED_LIBRARY_LINK_C_FLAGS "-Wl,--no-undefined -static-libgcc -Wl,-O1 -Wl,--as-needed -Wl,--sort-common")
-  SET(CMAKE_SHARED_LIBRARY_LINK_CXX_FLAGS "-Wl,--no-undefined -static-libgcc -Wl,-O1 -Wl,--as-needed -Wl,--sort-common")
-
-  list(APPEND LIBS psapi) # Needed for GetProcessMemoryInfo()
-  list(APPEND LIBS exchndl) # Needed for exception handling and backtrace()
-endif(WIN32)
 
 if(NOT CUSTOM_CFLAGS)
   if(BUILD_SSE2_CODEPATHS)
@@ -807,16 +739,6 @@ unset(LIBS)
 unset(STATIC_LIBS)
 unset(LIB_DEPS)
 
-#
-# Install lib_darktable
-#
-if(WIN32)
-  # Windows needs its DLLs in the same directory as the executable to find them.
-  install(TARGETS lib_darktable DESTINATION bin COMPONENT DTApplication)
-else(WIN32)
-  install(TARGETS lib_darktable DESTINATION ${CMAKE_INSTALL_LIBDIR}/darktable)
-endif(WIN32)
-
 # Compile views modules
 add_subdirectory(views)
 
@@ -858,27 +780,15 @@ endif(BUILD_TESTS)
 #
 add_executable(darktable ${SUBSYSTEM_MACOSX} ${SUBSYSTEM_WIN32} main.c ${RESOURCE_OBJECT})
 set_target_properties(darktable PROPERTIES LINKER_LANGUAGE C)
-if(APPLE)
-  set_target_properties(lib_darktable PROPERTIES LINK_FLAGS "-framework Carbon -framework AppKit")
-endif(APPLE)
 target_link_libraries(darktable lib_darktable)
 
-if (WIN32)
-  set_target_properties(darktable PROPERTIES LINK_FLAGS "-mconsole -mwindows -Wl,-subsystem,console")
-  _detach_debuginfo (darktable bin)
-  _detach_debuginfo (lib_darktable bin)
-else()
-    # Note that $ORIGIN is not a variable but has a special meaning at runtime.
-    # The string "$ORIGIN" should end up in the executable as-is.
-    set(RPATH_DT "$ORIGIN")
-    if (APPLE)
-        # The string "@loader_path" should end up in the executable as-is.
-        set(RPATH_DT "@loader_path")
-    endif()
-    set_target_properties(darktable
-                          PROPERTIES
-                          INSTALL_RPATH ${RPATH_DT}/../${CMAKE_INSTALL_LIBDIR}/darktable)
-endif(WIN32)
+
+# Note that $ORIGIN is not a variable but has a special meaning at runtime.
+# The string "$ORIGIN" should end up in the executable as-is.
+set(RPATH_DT "$ORIGIN")
+set_target_properties(darktable
+                      PROPERTIES
+                      INSTALL_RPATH ${RPATH_DT}/../${CMAKE_INSTALL_LIBDIR}/darktable)
 
 install(TARGETS darktable DESTINATION ${CMAKE_INSTALL_BINDIR} COMPONENT DTApplication)
 

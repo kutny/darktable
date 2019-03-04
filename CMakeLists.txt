@@ -124,12 +124,6 @@ MESSAGE(STATUS "Is the target platform supported: ${IS_SUPPORTED_PLATFORM}")
 set(CMAKE_REQUIRED_INCLUDES "${CMAKE_REQUIRED_INCLUDES_OLD}")
 unset(CMAKE_REQUIRED_INCLUDES_OLD)
 
-if(APPLE)
-	option(USE_MAC_INTEGRATION "Enable OS X integration" ON)
-else(APPLE)
-	set(USE_MAC_INTEGRATION OFF)
-endif(APPLE)
-
 # When cross compiling, CMAKE_INSTALL_PREFIX will point to something like "/opt/darktable", but that's not useful when using the path to load
 # modules on runtime. Then we need something like "C:\Program Files\darktable". Doesn't need to be set when doing regular compiles.
 if(NOT DEFINED RUNTIME_INSTALL_PREFIX)
@@ -144,42 +138,9 @@ if(CMAKE_ARCH_TRIPLET)
 		/usr/lib/${CMAKE_ARCH_TRIPLET})
 endif()
 
-#
-# Set platform defaults...
-#
-if(APPLE)
-	message("-- Mac OS X build detected, setting default features")
-
-	# prefer macports and/or user-installed libraries over system ones
-	LIST(APPEND CMAKE_PREFIX_PATH /opt/local /usr/local)
-	set(CMAKE_FIND_FRAMEWORK "LAST")
-	# except libstdc++ (only one linked via -l flag, not full path)
-	set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -L/usr/lib" CACHE STRING "" FORCE)
-	set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -L/usr/lib" CACHE STRING "" FORCE)
-	set(CMAKE_MODULE_LINKER_FLAGS "${CMAKE_MODULE_LINKER_FLAGS} -L/usr/lib" CACHE STRING "" FORCE)
-	mark_as_advanced(CMAKE_EXE_LINKER_FLAGS CMAKE_SHARED_LINKER_FLAGS CMAKE_MODULE_LINKER_FLAGS)
-
-	set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -D_DARWIN_C_SOURCE")
-	set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -D_DARWIN_C_SOURCE")
-	add_definitions("-DOS_OBJECT_USE_OBJC=0")
-endif(APPLE)
 
 include(compiler-versions)
 
-if(WIN32)
-  message("-- Win32 build detected, setting default features")
-  set(USE_COLORD OFF)
-  set(USE_KWALLET OFF)
-  set(BUILD_CMSTEST OFF)
-  set(BUILD_PRINT OFF)
-  set(TESTBUILD_OPENCL_PROGRAMS OFF)
-  if(BUILD_MSYS2_INSTALL)
-    add_definitions(-DMSYS2_INSTALL)
-  endif()
-endif(WIN32)
-
-
-#
 # Set package version
 #
 file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/src/") # the src/ subdirectory won't exist yet
@@ -276,17 +237,6 @@ endif()
 
 include(compiler-warnings)
 include(windows-macros)
-
-# Setting the runtime path works differently on OSX than on Linux or BSD.
-# Hence use a variable that maps those in the correct way for each OS.
-if(APPLE)
-    # The string "@loader_path" should end up in the executable as-is.
-    set(RPATH_DT "@loader_path")
-else(APPLE)
-    # Note that $ORIGIN is not a variable but has a special meaning at runtime.
-    # The string "$ORIGIN" should end up in the executable as-is.
-    set(RPATH_DT "$ORIGIN")
-endif(APPLE)
 
 # we need some external programs for building darktable
 message(STATUS "Looking for external programs")
@@ -486,50 +436,17 @@ if(NOT SOURCE_PACKAGE AND NOT (CMAKE_VERSION VERSION_LESS 3.3) AND DEFINED ENV{_
   endif()
 endif()
 
-#
-# Test SSE level
-#
-# if(NOT USE_SSE_FLAG)
-# 	set(SSE_C_TESTS "sse4" "sse3" "sse2" "sse")
-# 	message("-- Checking SSE instructions support by current CPU")
-# 	foreach(sse_test ${SSE_C_TESTS})
-# 		if(NOT SSE_FOUND)
-# 			if(WIN32)
-# 				set(SSE_CHECK_COMMAND "FAILURE")
-# 			elseif(APPLE)
-# 				set(SSE_CHECK_COMMAND sysctl -a | grep ${sse_test})
-# 			else()#other os
-# 				set(SSE_CHECK_COMMAND grep ${sse_test} /proc/cpuinfo)
-# 			endif(WIN32)
-# 			execute_process(COMMAND ${SSE_CHECK_COMMAND} RESULT_VARIABLE ret_var OUTPUT_VARIABLE out_var)
-#
-# 			if(ret_var EQUAL 0) # grep returns 0 on success
-# 				set(SSE_FOUND TRUE)
-# 				message("--  ${sse_test} detected and working.")
-# 				set(USE_SSE_SET ${sse_test})
-# 			endif(ret_var EQUAL 0)
-#
-# 		endif(NOT SSE_FOUND)
-# 	endforeach(sse_test)
-# endif(NOT USE_SSE_FLAG)
-#
-# # set the SSE
-# if(USE_SSE_SET)
-# 	set(CMAKE_C_FLAGS ${CMAKE_C_FLAGS} "-m${USE_SSE_SET}")
-# endif(USE_SSE_SET)
-
 # setup some theme specific variables
 set(THEME hicolor)
 set(THEME_DIRECTORY "${CMAKE_INSTALL_DATAROOTDIR}/icons/${THEME}")
 
 # we need some specific functions:
-if(NOT WIN32)
-    if(CMAKE_SYSTEM MATCHES "SunOS.*")
-        add_definitions("-D_XOPEN_SOURCE=600")
-    else()
-        add_definitions("-D_XOPEN_SOURCE=700")
-    endif(CMAKE_SYSTEM MATCHES "SunOS.*")
-endif(NOT WIN32)
+
+if(CMAKE_SYSTEM MATCHES "SunOS.*")
+    add_definitions("-D_XOPEN_SOURCE=600")
+else()
+    add_definitions("-D_XOPEN_SOURCE=700")
+endif(CMAKE_SYSTEM MATCHES "SunOS.*")
 
 # Set default component name - that way external modules like RawSpeed will install their
 # materials under the default component and not under 'Unspecified'
